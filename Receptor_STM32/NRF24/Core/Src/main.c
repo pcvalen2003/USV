@@ -112,6 +112,9 @@ bool NRF24_Init(void){
 	nrf24_flush_rx();
 	nrf24_flush_tx();
 
+	//Para debug
+	uint8_t CONFIG_reg = nrf24_r_reg(CONFIG, 1);
+
     // Configurar registro CONFIG:
     // - CRC de 2 bytes (CRCO)
     // - CRC habilitado (EN_CRC)
@@ -119,7 +122,11 @@ bool NRF24_Init(void){
     // - Modo PTX (PRIM_RX = 0)
 	nrf24_set_crc(en_crc, _2byte);
 	nrf24_pwr_up();
+	// Pongo en Modo PTX (PRIM_RX = 0)
+	nrf24_set_bit(CONFIG, 0, 0);
 
+	//Para debug
+	CONFIG_reg = nrf24_r_reg(CONFIG, 1);
 
     // Delay de power-up a standby (~1.5ms recomendado)
     HAL_Delay(2);
@@ -208,7 +215,7 @@ int main(void)
 		mensaje.y = (rx_buffer[3] << 8) | rx_buffer[2];
 
 	    char buffer[100];
-		snprintf(buffer,sizeof(buffer),"\nCoord X: %lu\tCoord Y: %lu",mensaje.x,mensaje.y);
+		snprintf(buffer,sizeof(buffer),"\nCoord X: %i\tCoord Y: %i",mensaje.x,mensaje.y);
 		HAL_UART_Transmit(&huart1, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
 
 		nrf24_flush_rx();
@@ -318,7 +325,7 @@ static void MX_USART1_UART_Init(void)
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
-  huart1.Init.Mode = UART_MODE_TX_RX;
+  huart1.Init.Mode = UART_MODE_TX;
   huart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
   huart1.Init.OverSampling = UART_OVERSAMPLING_16;
   if (HAL_UART_Init(&huart1) != HAL_OK)
@@ -361,10 +368,6 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /* EXTI interrupt init*/
-  HAL_NVIC_SetPriority(EXTI0_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI0_IRQn);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 
