@@ -1,0 +1,8 @@
+../Core/Src/main.c:72:6:NRF24_Init	1
+../Core/Src/main.c:160:5:main	3
+../Core/Src/main.c:246:6:SystemClock_Config	3
+../Core/Src/main.c:285:13:MX_SPI1_Init	2
+../Core/Src/main.c:323:13:MX_TIM3_Init	6
+../Core/Src/main.c:382:13:MX_USART1_UART_Init	2
+../Core/Src/main.c:415:13:MX_GPIO_Init	1
+../Core/Src/main.c:455:6:Error_Handler	1
