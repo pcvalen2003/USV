@@ -117,11 +117,11 @@ bool NRF24_Init(void){
 
 	//Retransmission setup
 	// 0110 (ARD) = 1.5ms, 0101 (ARC) = 5 retries.
-	uint8_t setup = 0b01100101;
-	uint8_t* p = &setup;
-	nrf24_w_reg(SETUP_RETR, p, sizeof(setup));
-
-	uint8_t SETUP_reg = nrf24_r_reg(SETUP_RETR, 1);
+//	uint8_t setup = 0b01100101;
+//	uint8_t* p = &setup;
+//	nrf24_w_reg(SETUP_RETR, p, sizeof(setup));
+//
+//	uint8_t SETUP_reg = nrf24_r_reg(SETUP_RETR, 1);
 
 	//Para debug
 	uint8_t CONFIG_reg = nrf24_r_reg(CONFIG, 1);
@@ -186,21 +186,36 @@ int main(void)
   MX_USART1_UART_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
+
   if (NRF24_Init() == 0) {
 
-	HAL_UART_Transmit(&huart1, "Error al iniciar la radio.\n", strlen("Error al iniciar la radio.\n"), HAL_MAX_DELAY);
+	HAL_UART_Transmit(&huart1, (uint8_t*)"Error al iniciar la radio.\n", strlen("Error al iniciar la radio.\n"), HAL_MAX_DELAY);
   }
   else{
 
-	HAL_UART_Transmit(&huart1, "Radio Iniciada.\n", strlen("Radio Iniciada.\n"), HAL_MAX_DELAY);
+	HAL_UART_Transmit(&huart1, (uint8_t*)"Radio Iniciada.\n", strlen("Radio Iniciada.\n"), HAL_MAX_DELAY);
   }
 
   //radio.setDataRate(RF24_250KBPS);
-  nrf24_data_rate(_250kbps);
+  //nrf24_data_rate(_250kbps);
   //radio.openReadingPipe(1, direccion);
   nrf24_open_rx_pipe(1, addr);
   //radio.startListening();
   nrf24_listen();
+
+  HAL_TIM_Base_Start(&htim3);
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
+
+  htim3.Instance->CCR3 = 256;
+  htim3.Instance->CCR4 = 256;
+
+  HAL_Delay(2000);
+
+  htim3.Instance->CCR3 = 127;
+  htim3.Instance->CCR4 = 127;
+
+  HAL_Delay(2000);
 
   /* USER CODE END 2 */
 
@@ -229,6 +244,11 @@ int main(void)
 		HAL_UART_Transmit(&huart1, (uint8_t*)buffer, strlen(buffer), HAL_MAX_DELAY);
 
 		nrf24_flush_rx();
+
+
+		htim3.Instance->CCR3 = (mensaje.x >> 5) + 127;
+		htim3.Instance->CCR4 = (mensaje.y >> 5) + 127;
+
 	}
 
 	HAL_Delay(5);
@@ -335,9 +355,9 @@ static void MX_TIM3_Init(void)
 
   /* USER CODE END TIM3_Init 1 */
   htim3.Instance = TIM3;
-  htim3.Init.Prescaler = 6250-1;
+  htim3.Init.Prescaler = 125-1;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 5120-1;
+  htim3.Init.Period = 2560-1;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -364,6 +384,10 @@ static void MX_TIM3_Init(void)
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim3, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
   {
     Error_Handler();
   }

@@ -12,10 +12,12 @@
 #define spi_rw_timeout 1000
 
 #define csn_gpio_port GPIOA
-#define csn_gpio_pin GPIO_PIN_3
+#define csn_gpio_pin GPIO_PIN_15 // 3
 
 #define ce_gpio_port GPIOA
-#define ce_gpio_pin GPIO_PIN_4
+#define ce_gpio_pin GPIO_PIN_12 // 4
+
+// y te pongo el de interrupción en PA11
 
 #endif
 
