@@ -35,47 +35,56 @@
 #include <usart.h>
 #include "gps.h"
 
-#if (GPS_DEBUG == 1)
-#include <usbd_cdc_if.h>
-#endif
+//#if (GPS_DEBUG == 1)
+//#include <usbd_cdc_if.h>
+//#endif
+
+#define NMEA_MAX_PAYLOAD_LEN 80
 
 uint8_t rx_data = 0;
 uint8_t rx_buffer[GPSBUFSIZE];
 uint8_t rx_index = 0;
+uint8_t rx_reception = 0;
+uint8_t rx_print_buffer[GPSBUFSIZE];
 
 GPS_t GPS;
 
-#if (GPS_DEBUG == 1)
-void GPS_print(char *data){
-	char buf[GPSBUFSIZE] = {0,};
-	sprintf(buf, "%s\n", data);
-	CDC_Transmit_FS((unsigned char *) buf, (uint16_t) strlen(buf));
-}
-#endif
+//#if (GPS_DEBUG == 1)
+//void GPS_print(char *data){
+//	char buf[GPSBUFSIZE] = {0,};
+//	sprintf(buf, "%s\n", data);
+//	CDC_Transmit_FS((unsigned char *) buf, (uint16_t) strlen(buf));
+//}
+//#endif
 
 void GPS_Init()
 {
-	HAL_UART_Receive_IT(GPS_USART, &rx_data, 1);
+	//HAL_UART_Receive_IT(GPS_USART, &rx_data, 1);
+	HAL_UART_Receive_IT(GPS_USART, &rx_reception, 1);
 }
 
 
 void GPS_UART_CallBack(){
 	if (rx_data != '\n' && rx_index < sizeof(rx_buffer)) {
 		rx_buffer[rx_index++] = rx_data;
-	} else {
+	} else {// se encontró un '\n' (osea el campo <LF>) o se excedio el tamaño del buffer.
 
-		#if (GPS_DEBUG == 1)
-		GPS_print((char*)rx_buffer);
-		#endif
+//		#if (GPS_DEBUG == 1)
+//		GPS_print((char*)rx_buffer);
+//		#endif
 
-		GPS_Debug_Print((char*)rx_buffer);
+		//GPS_Debug_Print((char*)rx_buffer);
 
-		if(GPS_validate((char*) rx_buffer))
+		if (GPS_validate((char*) rx_buffer)) {
+			GPS_Debug_Print((char*)rx_print_buffer);
 			GPS_parse((char*) rx_buffer);
+		}
 		rx_index = 0;
+		memset(rx_print_buffer, 0, sizeof(rx_print_buffer));
 		memset(rx_buffer, 0, sizeof(rx_buffer));
 	}
-	HAL_UART_Receive_IT(GPS_USART, &rx_data, 1);
+	//HAL_UART_Receive_IT(GPS_USART, &rx_data, 1);
+
 }
 
 
@@ -89,28 +98,40 @@ int GPS_validate(char *nmeastr){
     calculated_check=0;
 
     // check to ensure that the string starts with a $
-    if(nmeastr[i] == '$')
-        i++;
-    else
+    if(nmeastr[i] == '$'){
+    	rx_print_buffer[i] = nmeastr[i];
+    	i++;
+    }
+    else{
+    	strncpy(rx_print_buffer, "No se encontró $ al principio de la cadena", strlen(rx_print_buffer));
         return 0;
+    }
 
-    //No NULL reached, 75 char largest possible NMEA message, no '*' reached
-    while((nmeastr[i] != '\0') && (nmeastr[i] != '*') && (i < 75)){
+    //No NULL reached, NMEA_MAX_PAYLOAD_LEN char largest possible NMEA message, no '*' reached
+    while((nmeastr[i] != '\0') && (nmeastr[i] != '*') && (i < NMEA_MAX_PAYLOAD_LEN)){
+    	rx_print_buffer[i] = nmeastr[i];
         calculated_check ^= nmeastr[i];// calculate the checksum
         i++;
     }
 
-    if(i >= 75){
+    if(i >= NMEA_MAX_PAYLOAD_LEN){
+    	strncpy(rx_print_buffer, "Maximo Payload sobrepasado", strlen(rx_print_buffer));
         return 0;// the string was too long so return an error
     }
 
     if (nmeastr[i] == '*'){
         check[0] = nmeastr[i+1];    //put hex chars in check string
         check[1] = nmeastr[i+2];
-        check[2] = 0;
+        check[2] = '\0';
+        rx_print_buffer[i] = nmeastr[i];
+        rx_print_buffer[i+1] = nmeastr[i+1];
+        rx_print_buffer[i+2] = nmeastr[i+2];
+        rx_print_buffer[i+3] = '\0';
     }
-    else
+    else{
+    	strncpy(rx_print_buffer, "No se encontró *", strlen(rx_print_buffer));
         return 0;// no checksum separator found there for invalid
+    }
 
     sprintf(checkcalcstr,"%02X",calculated_check);
     return((checkcalcstr[0] == check[0])
@@ -152,8 +173,8 @@ float GPS_nmea_to_dec(float deg_coord, char nsew) {
 }
 
 void GPS_Debug_Print(char* data){
-	char buffer[200];
-	snprintf(buffer, sizeof(buffer), "%s \n", data);
+	char buffer[GPSBUFSIZE];
+	snprintf(buffer, sizeof(buffer)+2, "%s \n", data);
 	HAL_UART_Transmit(&huart2, (uint8_t*) buffer, strlen(buffer),HAL_MAX_DELAY);
 	//HAL_UART_Transmit(&huart2, data, strlen(&data), HAL_MAX_DELAY);
 }

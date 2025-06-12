@@ -22,6 +22,8 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "gps.h"
+#include "stdbool.h"
+#include <string.h>
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -42,6 +44,8 @@
 /* Private variables ---------------------------------------------------------*/
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
+bool data_ready = false;
+
 
 /* USER CODE BEGIN PV */
 
@@ -59,8 +63,12 @@ static void MX_USART2_UART_Init(void);
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart) {
-	if (huart == &huart1)
-		GPS_UART_CallBack();
+	if (huart == &huart1){
+		//GPS_UART_CallBack();
+		data_ready = true;
+		HAL_UART_Receive_IT(GPS_USART, &rx_reception, 1);
+	}
+
 }
 /* USER CODE END 0 */
 
@@ -97,12 +105,18 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
   GPS_Init();
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  if(data_ready){
+		  rx_data = rx_reception;
+		  GPS_UART_CallBack();
+		  data_ready = false;
+	  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

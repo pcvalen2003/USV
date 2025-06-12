@@ -52,12 +52,14 @@ typedef struct{
 extern uint8_t rx_data;
 extern uint8_t rx_buffer[GPSBUFSIZE];
 extern uint8_t rx_index;
+extern uint8_t rx_reception;
+extern uint8_t rx_print_buffer[GPSBUFSIZE];
 
 extern GPS_t GPS;
 
-#if (GPS_DEBUG == 1)
-void GPS_print(char *data);
-#endif
+//#if (GPS_DEBUG == 1)
+//void GPS_print(char *data);
+//#endif
 
 void GPS_Init();
 void GSP_USBPrint(char *data);
