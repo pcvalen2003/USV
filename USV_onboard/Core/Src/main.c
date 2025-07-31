@@ -111,8 +111,9 @@ msg_t mensaje = {
 uint16_t PLD_SIZE =  sizeof(msg_t);
 
 /***** Variables FSM onBoard	******/
-typedef  {
-
+typedef enum{
+	MANUAL = 0b00000001,
+	WAYPOINT = 0b00000011
 }modo_t;
 /* USER CODE END PV */
 
@@ -230,7 +231,7 @@ bool NRF24_Init(void){
     return (nrf24_r_reg(CONFIG, 1) == (_BV(EN_CRC) | _BV(CRCO) | _BV(PWR_UP))) ? true : false;
 }
 void Motor_Init(void){
-
+	//Inicialización MOTORES
 	  HAL_TIM_Base_Start(&htim1);
 	  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_1);
 	  HAL_TIM_PWM_Start(&htim1, TIM_CHANNEL_2);
@@ -240,12 +241,21 @@ void Motor_Init(void){
 
 	  HAL_Delay(2000);
 
-	  htim1.Instance->CCR1 = 127;
-	  htim1.Instance->CCR2 = 127;
+	  htim1.Instance->CCR1 = 128;
+	  htim1.Instance->CCR2 = 128;
 
 	  HAL_Delay(2000);
 
-	  // [INICIALIZACION DE TIMóN]
+	  // Innicialización TIMóN
+	  htim1.Instance->CCR3 = 128; //0 grados
+
+	  HAL_Delay(500);
+
+	  htim1.Instance->CCR3 = 256;	//180 grados (max)
+
+	  HAL_Delay(500);
+
+	  htim1.Instance->CCR3 = 192;	//90 grados (centrado)
 }
 /* USER CODE END PFP */
 
@@ -364,7 +374,9 @@ void SystemClock_Config(void)
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
   RCC_OscInitStruct.HSIState = RCC_HSI_ON;
   RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI_DIV2;
+  RCC_OscInitStruct.PLL.PLLMUL = RCC_PLL_MUL4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -374,7 +386,7 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSI;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV1;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
@@ -478,12 +490,12 @@ static void MX_TIM1_Init(void)
 
   /* USER CODE END TIM1_Init 1 */
   htim1.Instance = TIM1;
-  htim1.Init.Prescaler = 0;
+  htim1.Init.Prescaler = 125 - 1;
   htim1.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim1.Init.Period = 65535;
+  htim1.Init.Period = 2560 - 1;
   htim1.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim1.Init.RepetitionCounter = 0;
-  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  htim1.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
   if (HAL_TIM_Base_Init(&htim1) != HAL_OK)
   {
     Error_Handler();
@@ -687,11 +699,12 @@ void StartProcDatos(void *argument)
   for(;;)
   {
 	  ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-	  switch (mensaje.MODO) {
-		case :
-
+	  switch ((modo_t)mensaje.MODO) {
+		case MANUAL:
 			break;
-		default:
+		case WAYPOINT:
+			htim1.Instance->CCR1 = mensaje.POTENCIA*kdir;
+
 			break;
 	}
   }
