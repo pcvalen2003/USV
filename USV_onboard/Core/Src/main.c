@@ -24,9 +24,11 @@
 /* USER CODE BEGIN Includes */
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include "NRF24.h"
 #include "NRF24_conf.h"
 #include "NRF24_reg_addresses.h"
+#include "gps.h"
 
 /* USER CODE END Includes */
 
@@ -38,6 +40,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 #define _BV(x) (1 << (x))
+#define GPS_RX_BUFFER_SIZE 128
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -53,6 +56,7 @@ SPI_HandleTypeDef hspi1;
 TIM_HandleTypeDef htim1;
 
 UART_HandleTypeDef huart1;
+DMA_HandleTypeDef hdma_usart1_rx;
 
 /* Definitions for ACQ_GPS */
 osThreadId_t ACQ_GPSHandle;
@@ -115,11 +119,24 @@ typedef enum{
 	MANUAL = 0b00000001,
 	WAYPOINT = 0b00000011
 }modo_t;
+
+/***** Buffer de recepción NMEA *****/
+uint8_t GPSrx_buffer1[128];
+uint8_t GPSrx_buffer2[128];
+uint8_t GPSrx_buffer3[128];
+typedef enum {
+	MSG_ON_BUF1,
+	MSG_ON_BUF2,
+	MSG_ON_BUF3
+}notifyGPS_t;
+
+uint8_t len;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_I2C2_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_TIM1_Init(void);
@@ -156,6 +173,40 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     	portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
     }
 
+}
+void USART1_IRQHandler(void) {
+	static uint8_t buffer_idx;
+	const uint8_t *buffers[] = { GPSrx_buffer1, GPSrx_buffer2, GPSrx_buffer3};
+	notifyGPS_t NotifyGPS;
+
+    if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_IDLE)) {
+        __HAL_UART_CLEAR_IDLEFLAG(&huart1);
+
+        // Desactivo DMA momentáneamente
+        HAL_UART_DMAStop(&huart1);
+
+        switch (buffer_idx) {
+			case 0:
+				NotifyGPS = MSG_ON_BUF1;
+				break;
+			case 1:
+				NotifyGPS = MSG_ON_BUF2;
+				break;
+			case 2:
+				NotifyGPS = MSG_ON_BUF3;
+				break;
+		}
+
+        // Calculás cuántos bytes llegaron
+        len = GPS_RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(huart1.hdmarx);
+        buffer_idx = (buffer_idx + 1) % 3;
+
+        ulTaskNotifyValueClear(ACQ_GPSHandle, 0xFFFFFFFF);   // limpio notificaciones previas
+        xTaskNotify(ACQ_GPSHandle, NotifyGPS, eSetBits);  // nueva notificación
+
+        // Reinicio DMA desde el buffer correspondiente
+        HAL_UART_Receive_DMA(&huart1, buffers[buffer_idx], GPS_RX_BUFFER_SIZE);
+    }
 }
 bool NRF24_Init(void){
 	ce_low();
@@ -292,6 +343,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_I2C2_Init();
   MX_SPI1_Init();
   MX_TIM1_Init();
@@ -302,6 +354,7 @@ int main(void)
 	  return error;
   }
   Motor_Init();
+  HAL_UART_Receive_DMA(&huart1, GPSrx_buffer1, GPS_RX_BUFFER_SIZE); //Inicia en el Buffer 1
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -568,7 +621,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 115200;
+  huart1.Init.BaudRate = 9600;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -582,6 +635,22 @@ static void MX_USART1_UART_Init(void)
   /* USER CODE BEGIN USART1_Init 2 */
 
   /* USER CODE END USART1_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA1_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA1_Channel5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel5_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel5_IRQn);
 
 }
 
@@ -604,11 +673,11 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(NRF_CE_GPIO_Port, NRF_CE_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PC15 */
-  GPIO_InitStruct.Pin = GPIO_PIN_15;
+  /*Configure GPIO pin : NRF_IRQ_Pin */
+  GPIO_InitStruct.Pin = NRF_IRQ_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
-  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+  HAL_GPIO_Init(NRF_IRQ_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pins : VBAT_IN_Pin IBAT_IN_Pin */
   GPIO_InitStruct.Pin = VBAT_IN_Pin|IBAT_IN_Pin;
@@ -641,10 +710,32 @@ static void MX_GPIO_Init(void)
 void StartACQGPS(void *argument)
 {
   /* USER CODE BEGIN 5 */
+	notifyGPS_t NotifiedValue;
   /* Infinite loop */
   for(;;)
   {
-    osDelay(1);
+		xTaskNotifyWait(0x0, 0xFFFFFFFF, &NotifiedValue, portMAX_DELAY);
+
+		switch (NotifiedValue) {	//La notif. determina el buffer a leer.
+			case MSG_ON_BUF1:
+				for (int i = 0; i < len; i++) { // len siempre reserva el valor de cantidad de bytes escritos en el buffer
+					rx_data = GPSrx_buffer1[i];
+					GPS_UART_CallBack();
+				}
+				break;
+			case MSG_ON_BUF2:
+				for (int i = 0; i < len; i++) {
+					rx_data = GPSrx_buffer2[i];
+					GPS_UART_CallBack();
+				}
+				break;
+			case MSG_ON_BUF3:
+				for (int i = 0; i < len; i++) {
+					rx_data = GPSrx_buffer3[i];
+					GPS_UART_CallBack();
+				}
+				break;
+		}
   }
   /* USER CODE END 5 */
 }
@@ -695,15 +786,56 @@ void StartWatchDog(void *argument)
 void StartProcDatos(void *argument)
 {
   /* USER CODE BEGIN StartProcDatos */
+	modo_t modo;
+	uint8_t direccion;
+	uint8_t potencia;
+
+	typedef enum {
+		IZQUIERDA = 0,
+		DERECHA,
+		CENTRO
+	}dir_t;
+	dir_t i_or_d;
+
+	uint8_t k_giro;
+	uint8_t k_timon;
+
+	typedef struct {
+		uint8_t m_der;
+		uint8_t m_izq;
+	}vel_t;
+	vel_t velocidad;
+
   /* Infinite loop */
   for(;;)
   {
 	  ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-	  switch ((modo_t)mensaje.MODO) {
+	  // Copia de los datos del mensaje recibido por RF
+	  modo = (modo_t)mensaje.MODO;
+	  direccion = mensaje.DIRECCION;
+	  potencia = mensaje.POTENCIA;
+
+	  // Lógica de asignación de dirección
+	  if (direccion < 128) i_or_d = IZQUIERDA;
+	  else if (direccion > 128) i_or_d = DERECHA;
+	  else i_or_d = CENTRO;
+
+	  //Ganancia de giro
+	  k_giro = lut_giro[direccion];	//Asigna valor según función abs, parabola, etc.
+	  //Ganancia de giro del Timon
+	  k_timon = lut_timon[direccion];	//Asigna valor clampeado entre 45 y 135 grados.
+
+	  // Asignación de potencia de los motores
+	  velocidad.m_der = i_or_d == DERECHA? (potencia * k_giro)/256 : potencia;
+	  velocidad. m_izq = i_or_d == IZQUIERDA? (potencia * k_giro)/256 : potencia;
+
+	  switch (modo) {
 		case MANUAL:
+
+			htim1.Instance->CCR1 = mensaje.POTENCIA*kdir;
+
 			break;
 		case WAYPOINT:
-			htim1.Instance->CCR1 = mensaje.POTENCIA*kdir;
 
 			break;
 	}
