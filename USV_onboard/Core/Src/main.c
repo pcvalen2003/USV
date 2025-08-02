@@ -116,8 +116,9 @@ uint16_t PLD_SIZE =  sizeof(msg_t);
 
 /***** Variables FSM onBoard	******/
 typedef enum{
+	IDLE = 0b00000000,
 	MANUAL = 0b00000001,
-	WAYPOINT = 0b00000011
+	WAYPOINT = 0b00000010
 }modo_t;
 
 /***** Buffer de recepción NMEA *****/
@@ -226,7 +227,7 @@ bool NRF24_Init(void){
 	nrf24_auto_ack_all(enable);
 
     // Habilitar solo pipes RX 0 y 1 por defecto
-	nrf24_open_rx_pipe(0, addr);
+	nrf24_open_rx_pipe(0, NRF_addr);
 
     // Tamaño fijo de payload (por defecto 32 bytes)
 	nrf24_pipe_pld_size(0, PLD_SIZE);
