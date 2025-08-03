@@ -55,7 +55,7 @@ void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
 void Error_Handler(void);
 
 /* USER CODE BEGIN EFP */
-
+void USART1_IDLE_Interrupcion(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
@@ -71,10 +71,10 @@ void Error_Handler(void);
 #define NRF_MISO_GPIO_Port GPIOA
 #define NRF_MOSI_Pin GPIO_PIN_7
 #define NRF_MOSI_GPIO_Port GPIOA
-#define IMU_SCL_Pin GPIO_PIN_10
-#define IMU_SCL_GPIO_Port GPIOB
-#define IMU_SDA_Pin GPIO_PIN_11
-#define IMU_SDA_GPIO_Port GPIOB
+#define MPU_SCL_Pin GPIO_PIN_10
+#define MPU_SCL_GPIO_Port GPIOB
+#define MPU_SDA_Pin GPIO_PIN_11
+#define MPU_SDA_GPIO_Port GPIOB
 #define MOT_DER_Pin GPIO_PIN_8
 #define MOT_DER_GPIO_Port GPIOA
 #define MOT_IZQ_Pin GPIO_PIN_9

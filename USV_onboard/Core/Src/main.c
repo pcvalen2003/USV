@@ -25,12 +25,17 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdbool.h>
+#include <task.h>
+
 #include "NRF24.h"
 #include "NRF24_conf.h"
 #include "NRF24_reg_addresses.h"
 #include "gps.h"
 #include "MPU9250-DMP.h"
 #include "inv_mpu.h"
+#include "lut_timon.h"
+#include "lut_giro.h"
 
 /* USER CODE END Includes */
 
@@ -62,6 +67,7 @@ I2C_HandleTypeDef hi2c2;
 SPI_HandleTypeDef hspi1;
 
 TIM_HandleTypeDef htim1;
+TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart1;
 DMA_HandleTypeDef hdma_usart1_rx;
@@ -77,13 +83,6 @@ const osThreadAttr_t ACQ_GPS_attributes = {
 osThreadId_t ACQ_MPUHandle;
 const osThreadAttr_t ACQ_MPU_attributes = {
   .name = "ACQ_MPU",
-  .stack_size = 128 * 4,
-  .priority = (osPriority_t) osPriorityNormal,
-};
-/* Definitions for WatchDog */
-osThreadId_t WatchDogHandle;
-const osThreadAttr_t WatchDog_attributes = {
-  .name = "WatchDog",
   .stack_size = 128 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
@@ -105,8 +104,7 @@ typedef enum {
 error_t error;
 /***** Variables NRF24	*****/
 uint8_t NRF_addr[5] = {0xE1, 0xF0, 0xF0, 0xE8, 0xE8};	//Adress del módulo NRF24
-
-typedef struct{		// Estructura del mensaje a recibir
+typedef struct __attribute__((__packed__)){		// Estructura del mensaje a recibir
 	uint8_t MODO;
 	uint8_t POTENCIA;
 	uint8_t DIRECCION;
@@ -122,15 +120,16 @@ msg_t mensaje = {
 
 uint16_t PLD_SIZE =  sizeof(msg_t);
 
-typedef struct {	// Estructura del payload a enviar en el ACK
-	uint8_t ACK_estado;
-	float longitud;	//Coordenadas GPS
+// Estructura del payload a enviar en el ACK
+typedef struct __attribute__((__packed__)){	// el atributo colocado es para que no realice padding.
 	float latitud;
+	float longitud;	//Coordenadas GPS
+	float velocidad;
+	uint8_t ACK_estado;
 	uint8_t bat_level;	//Nivel de batería
 	uint8_t bat_current;	//Corriente medida
-	float velocidad;
-	uint16_t heading;
 	uint8_t sat_used;
+	uint16_t heading;
 	char extra[14];
 }ACKpld_t;
 ACKpld_t ACKpld;
@@ -148,10 +147,14 @@ uint8_t GPSrx_buffer3[128];
 typedef enum {
 	MSG_ON_BUF1,
 	MSG_ON_BUF2,
-	MSG_ON_BUF3
+	MSG_ON_BUF3,
+	NONE_MSG
 }notifyGPS_t;
 
 uint8_t len;
+
+/***** Variables WATCHDOG Timer *****/
+bool TIMEOUT_WDOG_OCCUR = false;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -164,9 +167,9 @@ static void MX_TIM1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_ADC2_Init(void);
+static void MX_TIM2_Init(void);
 void StartACQGPS(void *argument);
 void StartACQMPU(void *argument);
-void StartWatchDog(void *argument);
 void StartProcDatos(void *argument);
 
 /* USER CODE BEGIN PFP */
@@ -175,6 +178,8 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     if (GPIO_Pin == GPIO_PIN_15)
     {
+    	htim2.Instance->CNT = 0;	//Reinicio el WatchDog Timer
+
     	if (nrf24_data_available()) {
     		uint8_t rx_buffer[sizeof(msg_t)];
 
@@ -197,13 +202,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     }
 
 }
-void USART1_IRQHandler(void) {
+void USART1_IDLE_Interrupcion(void) {
 	static uint8_t buffer_idx;
-	const uint8_t *buffers[] = { GPSrx_buffer1, GPSrx_buffer2, GPSrx_buffer3};
-	notifyGPS_t NotifyGPS;
-
-    if (__HAL_UART_GET_FLAG(&huart1, UART_FLAG_IDLE)) {
-        __HAL_UART_CLEAR_IDLEFLAG(&huart1);
+	uint8_t *buffers[] = { GPSrx_buffer1, GPSrx_buffer2, GPSrx_buffer3};
+	notifyGPS_t NotifyGPS = NONE_MSG;
 
         // Desactivo DMA momentáneamente
         HAL_UART_DMAStop(&huart1);
@@ -224,12 +226,10 @@ void USART1_IRQHandler(void) {
         len = GPS_RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(huart1.hdmarx);
         buffer_idx = (buffer_idx + 1) % 3;
 
-        ulTaskNotifyValueClear(ACQ_GPSHandle, 0xFFFFFFFF);   // limpio notificaciones previas
-        xTaskNotify(ACQ_GPSHandle, NotifyGPS, eSetBits);  // nueva notificación
+        xTaskNotify(ACQ_GPSHandle, NotifyGPS, eSetValueWithOverwrite);  // nueva notificación
 
         // Reinicio DMA desde el buffer correspondiente
         HAL_UART_Receive_DMA(&huart1, buffers[buffer_idx], GPS_RX_BUFFER_SIZE);
-    }
 }
 bool NRF24_Init(void){
 	ce_low();
@@ -280,10 +280,10 @@ bool NRF24_Init(void){
 	uint8_t* p = &setup;
 	nrf24_w_reg(SETUP_RETR, p, sizeof(setup));
 
-	uint8_t SETUP_reg = nrf24_r_reg(SETUP_RETR, 1);
+//	uint8_t SETUP_reg = nrf24_r_reg(SETUP_RETR, 1);
 
 	//Para debug
-	uint8_t CONFIG_reg = nrf24_r_reg(CONFIG, 1);
+//	uint8_t CONFIG_reg = nrf24_r_reg(CONFIG, 1);
 
     // Configurar registro CONFIG:
     // - CRC de 2 bytes (CRCO)
@@ -298,7 +298,7 @@ bool NRF24_Init(void){
     // Delay de power-up a standby (~1.5ms recomendado)
     HAL_Delay(2);
 
-    nrf24_open_rx_pipe(0, addr);
+    nrf24_open_rx_pipe(0, NRF_addr);
     nrf24_listen();
 
     // Verificación de escritura de CONFIG
@@ -330,6 +330,21 @@ void Motor_Init(void){
 	  HAL_Delay(500);
 
 	  htim1.Instance->CCR3 = 192;	//90 grados (centrado)
+}
+uint8_t map_vel_to_pwm(uint8_t vel)
+{
+    return (uint16_t)vel * (255 - 127) / 255 + 127;
+}
+//uint8_t map_angle_to_pwm(uint8_t angulo) {
+//    if (angulo < 0) angulo = 0;
+//    if (angulo > 180) angulo = 180;
+//    return 128 + (uint16_t)(angulo / 180) * 128;
+//}
+void callback_in(int){
+
+}
+void callback_out(int){
+
 }
 /* USER CODE END PFP */
 
@@ -373,14 +388,12 @@ int main(void)
   MX_USART1_UART_Init();
   MX_ADC1_Init();
   MX_ADC2_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
   /*** Inicializo los ADC de BatLevel y Current ***/
   HAL_ADC_Start(&hadc1);
   HAL_ADC_Start(&hadc2);
-  if (NRF24_Init() == 0) {
-	  error = NRF24_NOT_INIT;
-	  return error;
-  }
+
   Motor_Init();
   HAL_UART_Receive_DMA(&huart1, GPSrx_buffer1, GPS_RX_BUFFER_SIZE); //Inicia en el Buffer 1
   /*** INIT MPU ***/
@@ -391,6 +404,12 @@ int main(void)
   MPU9250_setSampleRate(50); //Sample Rate de acc y gyro en 50Hz
   MPU9250_setCompassSampleRate(100);
   MPU9250_dmpBegin(DMP_FEATURE_GYRO_CAL | DMP_FEATURE_SEND_CAL_GYRO, 50);
+
+  if (NRF24_Init() == 0) {
+	  error = NRF24_NOT_INIT;
+	  return error;
+  }
+  HAL_TIM_Base_Start(&htim2);
 
   /* USER CODE END 2 */
 
@@ -419,9 +438,6 @@ int main(void)
 
   /* creation of ACQ_MPU */
   ACQ_MPUHandle = osThreadNew(StartACQMPU, NULL, &ACQ_MPU_attributes);
-
-  /* creation of WatchDog */
-  WatchDogHandle = osThreadNew(StartWatchDog, NULL, &WatchDog_attributes);
 
   /* creation of Proc_datos */
   Proc_datosHandle = osThreadNew(StartProcDatos, NULL, &Proc_datos_attributes);
@@ -744,6 +760,51 @@ static void MX_TIM1_Init(void)
 }
 
 /**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 2560 - 1;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 3125 - 1;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+
+}
+
+/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -842,15 +903,16 @@ static void MX_GPIO_Init(void)
 void StartACQGPS(void *argument)
 {
   /* USER CODE BEGIN 5 */
-	notifyGPS_t NotifiedValue;
+	uint32_t NotifiedValue;
+	notifyGPS_t NotifyValue_temp; //Genero la variable para leer el Valor de la notificación como el enum especiífico
 
   /* Infinite loop */
   for(;;)
   {
 		xTaskNotifyWait(0x0, 0xFFFFFFFF, &NotifiedValue, portMAX_DELAY);
 		uint8_t updateData = 0; //Variable para saber si se parseo algún dato
-
-		switch (NotifiedValue) {	//La notif. determina el buffer a leer.
+		NotifyValue_temp = (notifyGPS_t)NotifiedValue;
+		switch (NotifyValue_temp) {	//La notif. determina el buffer a leer.
 			case MSG_ON_BUF1:
 				for (int i = 0; i < len; i++) { // len siempre reserva el valor de cantidad de bytes escritos en el buffer
 					rx_data = GPSrx_buffer1[i];
@@ -868,6 +930,8 @@ void StartACQGPS(void *argument)
 					rx_data = GPSrx_buffer3[i];
 					updateData = GPS_UART_CallBack();
 				}
+				break;
+			default:
 				break;
 		}
 
@@ -902,30 +966,12 @@ void StartACQMPU(void *argument)
 		  MPU9250_update(UPDATE_COMPASS);
 		  MPU9250_computeEulerAngles(1);
 		  ACKpld.heading = MPU9250_computeCompassHeading();
-		  memcpy(ACKpld.extra[0], &roll_inside, 2);
-		  memcpy(ACKpld.extra[2], &pitch_inside, 2);
+		  memcpy(&ACKpld.extra[0], &roll_inside, 2);
+		  memcpy(&ACKpld.extra[4], &pitch_inside, 2);
 	  }
 	  vTaskDelayUntil( &xLastWakeTime, xDelay);
   }
   /* USER CODE END StartACQMPU */
-}
-
-/* USER CODE BEGIN Header_StartWatchDog */
-/**
-* @brief Function implementing the WatchDog thread.
-* @param argument: Not used
-* @retval None
-*/
-/* USER CODE END Header_StartWatchDog */
-void StartWatchDog(void *argument)
-{
-  /* USER CODE BEGIN StartWatchDog */
-  /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
-  /* USER CODE END StartWatchDog */
 }
 
 /* USER CODE BEGIN Header_StartProcDatos */
@@ -975,7 +1021,7 @@ void StartProcDatos(void *argument)
 	  //Ganancia de giro
 	  k_giro = lut_giro[direccion];	//Asigna valor según función abs, parabola, etc.
 	  //Ganancia de giro del Timon
-	  k_timon = lut_timon[direccion];	//Asigna valor clampeado entre 45 y 135 grados.
+	  k_timon = lut_timon[direccion];	//Asigna valor clampeado entre 45 y 135 grados, pasados ya a PWM.
 
 	  // Asignación de potencia de los motores
 	  velocidad.m_der = i_or_d == DERECHA? (potencia * k_giro)/256 : potencia;
@@ -983,10 +1029,21 @@ void StartProcDatos(void *argument)
 
 	  switch (modo) {
 		case MANUAL:
+			// Asigna la potencia/velocidad a los motores.
+			htim1.Instance->CCR1 = map_vel_to_pwm(velocidad.m_der);
+			htim1.Instance->CCR2 = map_vel_to_pwm(velocidad.m_izq);
 
+			//Asigna la posición al timón
+			htim1.Instance->CCR3 =  k_timon;
+			CLEAR_BIT(ACKpld.ACK_estado, 0);
 			break;
 		case IDLE:
+			// Asigna velocidad nula a los motores.
+			htim1.Instance->CCR1 = 128;
+			htim1.Instance->CCR2 = 128;
 
+			//Asigna la posición inicial al timón
+			htim1.Instance->CCR3 =  192;
 			break;
 		case WAYPOINT:
 
@@ -994,7 +1051,16 @@ void StartProcDatos(void *argument)
 	}
 	  ACKpld.bat_current = getBatCurrent();
 	  ACKpld.bat_level = getBatLevel();
-	  nrf24_transmit_rx_ack_pld(0, &ACKpld, sizeof(ACKpld));
+	  if(TIMEOUT_WDOG_OCCUR){
+		  SET_BIT(ACKpld.ACK_estado, 7);
+		  TIMEOUT_WDOG_OCCUR = false;
+		  HAL_TIM_Base_Start(&htim2);
+	  }
+	  else{
+		  CLEAR_BIT(ACKpld.ACK_estado, 7);
+	  }
+	  nrf24_transmit_rx_ack_pld(0, (uint8_t*)&ACKpld, sizeof(ACKpld));	//Casteo (uint8_t*) porque así acepta los unteros la función
+	  	  	  	  	  	  	  	  	  	  	  	  	  	  	  	  	  	//Está bien? Lo veremos.
   }
   /* USER CODE END StartProcDatos */
 }
@@ -1016,7 +1082,16 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
+  if(htim->Instance == TIM2){
+	  TIMEOUT_WDOG_OCCUR = true;
+	  // Asigna velocidad nula a los motores.
+	  htim1.Instance->CCR1 = 128;
+	  htim1.Instance->CCR2 = 128;
 
+	  //Asigna la posición inicial al timón
+	  htim1.Instance->CCR3 =  192;
+	  HAL_TIM_Base_Stop(&htim2);
+  }
   /* USER CODE END Callback 1 */
 }
 
