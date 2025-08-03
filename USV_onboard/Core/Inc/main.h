@@ -61,6 +61,7 @@ void USART1_IDLE_Interrupcion(void);
 /* Private defines -----------------------------------------------------------*/
 #define NRF_IRQ_Pin GPIO_PIN_15
 #define NRF_IRQ_GPIO_Port GPIOC
+#define NRF_IRQ_EXTI_IRQn EXTI15_10_IRQn
 #define BAT_LEVEL_Pin GPIO_PIN_0
 #define BAT_LEVEL_GPIO_Port GPIOA
 #define BAT_CURRENT_Pin GPIO_PIN_4

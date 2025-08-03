@@ -159,7 +159,7 @@ uint8_t GPS_parse(char *GPSstrParse){
         if(sscanf(GPSstrParse, "$GPVTG,%f,%c,%f,%c,%f,%c,%f,%c", &GPS.course_t, &GPS.course_t_unit, &GPS.course_m, &GPS.course_m_unit, &GPS.speed_k, &GPS.speed_k_unit, &GPS.speed_km, &GPS.speed_km_unit) >= 1)
             return 1;
     }
-    else return 0;
+    return 0;
 }
 
 float GPS_nmea_to_dec(float deg_coord, char nsew) {
