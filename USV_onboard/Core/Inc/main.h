@@ -61,10 +61,10 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define NRF_IRQ_Pin GPIO_PIN_15
 #define NRF_IRQ_GPIO_Port GPIOC
-#define VBAT_IN_Pin GPIO_PIN_0
-#define VBAT_IN_GPIO_Port GPIOA
-#define IBAT_IN_Pin GPIO_PIN_4
-#define IBAT_IN_GPIO_Port GPIOA
+#define BAT_LEVEL_Pin GPIO_PIN_0
+#define BAT_LEVEL_GPIO_Port GPIOA
+#define BAT_CURRENT_Pin GPIO_PIN_4
+#define BAT_CURRENT_GPIO_Port GPIOA
 #define NRF_SCK_Pin GPIO_PIN_5
 #define NRF_SCK_GPIO_Port GPIOA
 #define NRF_MISO_Pin GPIO_PIN_6
