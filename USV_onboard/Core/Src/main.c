@@ -200,7 +200,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     	vTaskNotifyGiveFromISR(Proc_datosHandle, &xHigherPriorityTaskWoken); //Notificar a procesar datos que hay uno nuevo
     	portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
     }
-
 }
 void USART1_IDLE_Interrupcion(void) {
 	static uint8_t buffer_idx;
@@ -874,8 +873,8 @@ static void MX_GPIO_Init(void)
 
   /*Configure GPIO pin : NRF_IRQ_Pin */
   GPIO_InitStruct.Pin = NRF_IRQ_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(NRF_IRQ_GPIO_Port, &GPIO_InitStruct);
 
   /*Configure GPIO pin : NRF_CE_Pin */
