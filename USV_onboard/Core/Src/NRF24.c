@@ -13,11 +13,11 @@ extern SPI_HandleTypeDef hspiX;
 
 // Las comento porque CSN está atado a Tierra en la PCB
 void csn_high(void){
-	//HAL_GPIO_WritePin(csn_gpio_port, csn_gpio_pin, 1);
+	HAL_GPIO_WritePin(csn_gpio_port, csn_gpio_pin, 1);
 }
 
 void csn_low(void){
-	//HAL_GPIO_WritePin(csn_gpio_port, csn_gpio_pin, 0);
+	HAL_GPIO_WritePin(csn_gpio_port, csn_gpio_pin, 0);
 }
 
 void ce_high(void){

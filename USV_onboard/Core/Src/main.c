@@ -76,21 +76,21 @@ DMA_HandleTypeDef hdma_usart1_rx;
 osThreadId_t ACQ_GPSHandle;
 const osThreadAttr_t ACQ_GPS_attributes = {
   .name = "ACQ_GPS",
-  .stack_size = 128 * 4,
+  .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for ACQ_MPU */
 osThreadId_t ACQ_MPUHandle;
 const osThreadAttr_t ACQ_MPU_attributes = {
   .name = "ACQ_MPU",
-  .stack_size = 128 * 4,
+  .stack_size = 512 * 4,
   .priority = (osPriority_t) osPriorityNormal,
 };
 /* Definitions for Proc_datos */
 osThreadId_t Proc_datosHandle;
 const osThreadAttr_t Proc_datos_attributes = {
   .name = "Proc_datos",
-  .stack_size = 128 * 4,
+  .stack_size = 256 * 4,
   .priority = (osPriority_t) osPriorityHigh,
 };
 /* USER CODE BEGIN PV */
@@ -118,7 +118,7 @@ msg_t mensaje = {
 		.EXTRA = {0}
 };
 
-uint16_t PLD_SIZE =  sizeof(msg_t);
+uint16_t PLD_SIZE = 32;
 
 // Estructura del payload a enviar en el ACK
 typedef struct __attribute__((__packed__)){	// el atributo colocado es para que no realice padding.
@@ -237,7 +237,7 @@ bool NRF24_Init(void){
 	HAL_Delay(5);
 
 	// Velocidad inicial confiable (1 Mbps)
-	nrf24_data_rate(_1mbps);
+	nrf24_data_rate(_250kbps);
 
     // Habilitar ACK payload y payload dinámico
 	nrf24_en_ack_pld(enable);
@@ -249,14 +249,12 @@ bool NRF24_Init(void){
 
     // Habilitar solo pipes RX 0 y 1 por defecto
 	nrf24_open_rx_pipe(0, NRF_addr);
+	//nrf24_open_rx_pipe(1, NRF_addr);
 
     // Tamaño fijo de payload (por defecto 32 bytes)
 	nrf24_pipe_pld_size(0, PLD_SIZE);
-	nrf24_pipe_pld_size(1, PLD_SIZE);
-	nrf24_pipe_pld_size(2, PLD_SIZE);
-	nrf24_pipe_pld_size(3, PLD_SIZE);
-	nrf24_pipe_pld_size(4, PLD_SIZE);
-	nrf24_pipe_pld_size(5, PLD_SIZE);
+	//nrf24_pipe_pld_size(1, PLD_SIZE);
+
 
     // Ancho de dirección: 5 bytes (máximo permitido)
 	nrf24_set_addr_width(5);
@@ -282,7 +280,7 @@ bool NRF24_Init(void){
 //	uint8_t SETUP_reg = nrf24_r_reg(SETUP_RETR, 1);
 
 	//Para debug
-//	uint8_t CONFIG_reg = nrf24_r_reg(CONFIG, 1);
+	volatile uint8_t CONFIG_reg = nrf24_r_reg(CONFIG, 1);
 
     // Configurar registro CONFIG:
     // - CRC de 2 bytes (CRCO)
@@ -293,15 +291,20 @@ bool NRF24_Init(void){
 	nrf24_pwr_up();
 	// Pongo en Modo PTX (PRIM_RX = 0)
 	nrf24_set_bit(CONFIG, 0, 0);
+	//Reflejo solo la IRQ RX_DR en el pin IRQ
+	nrf24_set_bit(CONFIG, 6, 0);
+	nrf24_set_bit(CONFIG, 5, 1);
+	nrf24_set_bit(CONFIG, 4, 1);
+
+
+	//Para debug
+	CONFIG_reg = nrf24_r_reg(CONFIG, 1);
 
     // Delay de power-up a standby (~1.5ms recomendado)
     HAL_Delay(2);
 
-    nrf24_open_rx_pipe(0, NRF_addr);
-    nrf24_listen();
-
     // Verificación de escritura de CONFIG
-    return (nrf24_r_reg(CONFIG, 1) == (_BV(EN_CRC) | _BV(CRCO) | _BV(PWR_UP))) ? true : false;
+    return (nrf24_r_reg(CONFIG, 1) == (_BV(EN_CRC) | _BV(CRCO) | _BV(PWR_UP) | _BV(MASK_TX_DS) | _BV(MASK_MAX_RT))) ? true : false;
 }
 void Motor_Init(void){
 	//Inicialización MOTORES
@@ -389,6 +392,14 @@ int main(void)
   MX_ADC2_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+
+
+
+  if (NRF24_Init() == 0) {
+	  error = NRF24_NOT_INIT;
+	  while(1);
+  }
+
   /*** Inicializo los ADC de BatLevel y Current ***/
   HAL_ADC_Start(&hadc1);
   HAL_ADC_Start(&hadc2);
@@ -404,10 +415,10 @@ int main(void)
   MPU9250_setCompassSampleRate(100);
   MPU9250_dmpBegin(DMP_FEATURE_GYRO_CAL | DMP_FEATURE_SEND_CAL_GYRO, 50);
 
-  if (NRF24_Init() == 0) {
-	  error = NRF24_NOT_INIT;
-	  return error;
-  }
+
+
+  nrf24_listen();
+
   HAL_TIM_Base_Start(&htim2);
 
   /* USER CODE END 2 */
@@ -868,21 +879,11 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
-  /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(NRF_CE_GPIO_Port, NRF_CE_Pin, GPIO_PIN_RESET);
-
   /*Configure GPIO pin : NRF_IRQ_Pin */
   GPIO_InitStruct.Pin = NRF_IRQ_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(NRF_IRQ_GPIO_Port, &GPIO_InitStruct);
-
-  /*Configure GPIO pin : NRF_CE_Pin */
-  GPIO_InitStruct.Pin = NRF_CE_Pin;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(NRF_CE_GPIO_Port, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI15_10_IRQn, 5, 0);
@@ -1027,8 +1028,8 @@ void StartProcDatos(void *argument)
 	  k_timon = lut_timon[direccion];	//Asigna valor clampeado entre 45 y 135 grados, pasados ya a PWM.
 
 	  // Asignación de potencia de los motores
-	  velocidad.m_der = i_or_d == DERECHA? (potencia * k_giro)/256 : potencia;
-	  velocidad. m_izq = i_or_d == IZQUIERDA? (potencia * k_giro)/256 : potencia;
+	  velocidad.m_der = i_or_d == DERECHA? (potencia * (255 - k_giro))/256 : potencia;
+	  velocidad.m_izq = i_or_d == IZQUIERDA? (potencia * (255 - k_giro))/256 : potencia;
 
 	  switch (modo) {
 		case MANUAL:
@@ -1062,8 +1063,10 @@ void StartProcDatos(void *argument)
 	  else{
 		  CLEAR_BIT(ACKpld.ACK_estado, 7);
 	  }
-	  nrf24_transmit_rx_ack_pld(0, (uint8_t*)&ACKpld, sizeof(ACKpld));	//Casteo (uint8_t*) porque así acepta los unteros la función
-	  	  	  	  	  	  	  	  	  	  	  	  	  	  	  	  	  	//Está bien? Lo veremos.
+	  nrf24_flush_tx();
+	  nrf24_transmit_rx_ack_pld(0, (uint8_t*)&ACKpld, PLD_SIZE);	//Casteo (uint8_t*) porque así acepta los punteros la función
+	  nrf24_transmit_rx_ack_pld(1, (uint8_t*)&ACKpld, PLD_SIZE);
+
   }
   /* USER CODE END StartProcDatos */
 }

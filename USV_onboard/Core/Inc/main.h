@@ -82,8 +82,6 @@ void USART1_IDLE_Interrupcion(void);
 #define MOT_IZQ_GPIO_Port GPIOA
 #define TIMON_Pin GPIO_PIN_10
 #define TIMON_GPIO_Port GPIOA
-#define NRF_CE_Pin GPIO_PIN_5
-#define NRF_CE_GPIO_Port GPIOB
 #define GPS_TX_Pin GPIO_PIN_6
 #define GPS_TX_GPIO_Port GPIOB
 #define GPS_RX_Pin GPIO_PIN_7
